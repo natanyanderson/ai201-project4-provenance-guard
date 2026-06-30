@@ -1,15 +1,15 @@
 """
 app.py — Provenance Guard Flask backend.
 
-Milestone 3 scope:
-  - POST /submit : accepts text, runs Signal 1 (Groq), returns a content_id,
-                   attribution result, a (placeholder) confidence score, and a
-                   (placeholder) label. Writes a structured audit log entry.
+Milestone 4 scope:
+  - POST /submit : accepts text, runs BOTH signals (Groq + stylometric),
+                   combines them into the real confidence score, classifies
+                   the result, and writes a structured audit log entry.
   - GET  /log    : returns the audit log entries as JSON.
 
-Confidence is currently just the Groq score. Milestone 4 will add the second
-(stylometric) signal and combine the two into the real confidence score.
-Milestone 5 will replace the placeholder label with the real transparency labels.
+Confidence is now the average of the two signal scores (per planning.md).
+Milestone 5 will replace the placeholder label with the real transparency
+labels and add the /appeal endpoint.
 """
 
 import json
@@ -21,7 +21,7 @@ from flask import Flask, request, jsonify
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
-from detection import groq_signal
+from detection import groq_signal, stylometric_signal
 
 app = Flask(__name__)
 
@@ -74,20 +74,21 @@ def submit():
     if not text or not text.strip():
         return jsonify({"error": "Missing 'text' field"}), 400
 
-    # Signal 1: Groq LLM
+    # Run both detection signals
     llm_score = groq_signal(text)
+    style_score = stylometric_signal(text)
 
-    # M3 placeholder: confidence is just the LLM score for now.
-    # M4 will combine this with the stylometric signal.
-    confidence = llm_score
+    # Combine into the real confidence score (per planning.md):
+    # both signals weighted equally because they measure independent properties.
+    confidence = (llm_score + style_score) / 2
     attribution = classify(confidence)
 
     content_id = str(uuid.uuid4())
 
-    # M3 placeholder label. Real transparency labels arrive in M5.
+    # M4 still uses a placeholder label. Real transparency labels arrive in M5.
     label = f"[placeholder] {attribution} (confidence {confidence:.2f})"
 
-    # Write a structured audit log entry
+    # Write a structured audit log entry (now includes BOTH signal scores)
     entry = {
         "content_id": content_id,
         "creator_id": creator_id,
@@ -95,6 +96,7 @@ def submit():
         "attribution": attribution,
         "confidence": round(confidence, 2),
         "llm_score": round(llm_score, 2),
+        "stylometric_score": round(style_score, 2),
         "status": "classified",
     }
     write_log(entry)
@@ -103,6 +105,8 @@ def submit():
         "content_id": content_id,
         "attribution": attribution,
         "confidence": round(confidence, 2),
+        "llm_score": round(llm_score, 2),
+        "stylometric_score": round(style_score, 2),
         "label": label,
     })
 
